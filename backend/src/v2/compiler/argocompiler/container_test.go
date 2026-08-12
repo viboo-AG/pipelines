@@ -33,6 +33,14 @@ func TestLauncherResources(t *testing.T) {
 	assert.Equal(t, "256Mi", memoryRequest.String())
 }
 
+func TestTaskRetryStrategyRetriesAllFailures(t *testing.T) {
+	compiler := &workflowCompiler{}
+
+	strategy := compiler.getTaskRetryStrategyFromInput("3", "1s", "2", "1m")
+
+	assert.Equal(t, wfapi.RetryPolicyAlways, strategy.RetryPolicy)
+}
+
 func TestAddContainerExecutorTemplate(t *testing.T) {
 	tests := []struct {
 		name                  string

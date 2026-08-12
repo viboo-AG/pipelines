@@ -664,6 +664,7 @@ func (c *workflowCompiler) getTaskRetryStrategyFromInput(maxCount string, backOf
 	}
 
 	return &wfapi.RetryStrategy{
+		RetryPolicy: wfapi.RetryPolicyAlways,
 		Limit: &intstr.IntOrString{
 			Type:   intstr.String,
 			StrVal: maxCount,
