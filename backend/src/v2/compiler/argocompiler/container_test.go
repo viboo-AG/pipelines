@@ -22,7 +22,16 @@ import (
 	wfapi "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
 	"github.com/kubeflow/pipelines/kubernetes_platform/go/kubernetesplatform"
 	"github.com/stretchr/testify/assert"
+	k8score "k8s.io/api/core/v1"
 )
+
+func TestLauncherResources(t *testing.T) {
+	memoryLimit := launcherResources.Limits[k8score.ResourceMemory]
+	memoryRequest := launcherResources.Requests[k8score.ResourceMemory]
+
+	assert.Equal(t, "512Mi", memoryLimit.String())
+	assert.Equal(t, "256Mi", memoryRequest.String())
+}
 
 func TestAddContainerExecutorTemplate(t *testing.T) {
 	tests := []struct {
