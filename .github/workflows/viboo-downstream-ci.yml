@@ -1,0 +1,43 @@
+name: Viboo downstream CI
+
+on:
+  push:
+    branches:
+      - "release/**"
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    name: Test compiler and build API server
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            api/go.sum
+            kubernetes_platform/go.sum
+      - name: Check Go formatting
+        run: |
+          gofmt -w \
+            backend/src/v2/compiler/argocompiler/argo.go \
+            backend/src/v2/compiler/argocompiler/container.go \
+            backend/src/v2/compiler/argocompiler/container_test.go
+          git diff --exit-code
+      - name: Run compiler unit tests
+        run: go test ./backend/src/v2/compiler/argocompiler
+      - name: Build API server
+        run: go build -o apiserver backend/src/apiserver/*.go
+      - name: Upload API server
+        uses: actions/upload-artifact@v4
+        with:
+          name: kfp-api-server-linux-amd64
+          path: apiserver
+          if-no-files-found: error
+          retention-days: 30
