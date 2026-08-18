@@ -213,9 +213,11 @@ root:
     await waitFor(() => expect(screen.getByTestId('ParallelForIterationList')).not.toBeNull());
     expect(screen.getByText('205 of 205 items')).not.toBeNull();
     userEvent.type(screen.getByLabelText('Search items'), 'unit-173');
-    userEvent.click(screen.getByRole('button', { name: 'View details for unit-173' }));
+    userEvent.click(screen.getByRole('button', { name: 'Open Sub-DAG for unit-173' }));
 
-    expect(screen.getByText('Open Sub-DAG')).not.toBeNull();
+    await waitFor(() => expect(screen.getByTestId('DagCanvas')).not.toBeNull());
+    expect(screen.queryByTestId('ParallelForIterationList')).toBeNull();
+    expect(screen.getByText('for-loop-1.173')).not.toBeNull();
   });
 
   it('Shows error banner when disconnected from MLMD', async () => {

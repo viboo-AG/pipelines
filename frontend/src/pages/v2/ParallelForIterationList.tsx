@@ -15,7 +15,7 @@
  */
 
 import {
-  Button,
+  ButtonBase,
   InputAdornment,
   MenuItem,
   Paper,
@@ -59,14 +59,14 @@ export interface ParallelForIterationListProps {
   iterations: ParallelForIteration[];
   layers: string[];
   onLayersUpdate: (layers: string[]) => void;
-  onIterationClick: (node: Node<FlowElementDataBase>) => void;
+  onIterationOpen: (node: Node<FlowElementDataBase>) => void;
 }
 
 export default function ParallelForIterationList({
   iterations,
   layers,
   onLayersUpdate,
-  onIterationClick,
+  onIterationOpen,
 }: ParallelForIterationListProps) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(ALL_STATUSES);
@@ -122,18 +122,37 @@ export default function ParallelForIterationList({
   );
 
   return (
-    <div data-testid='ParallelForIterationList' style={{ height: '100%' }}>
+    <div
+      data-testid='ParallelForIterationList'
+      style={{
+        display: 'flex',
+        flex: '1 1 0',
+        flexDirection: 'column',
+        minHeight: 0,
+        overflow: 'hidden',
+      }}
+    >
       <SubDagLayer layers={layers} onLayersUpdate={onLayersUpdate} />
       <div
         style={{
           background: color.lightGrey,
           boxSizing: 'border-box',
-          height: 'calc(100% - 49px)',
-          overflow: 'auto',
+          display: 'flex',
+          flex: '1 1 0',
+          minHeight: 0,
+          overflow: 'hidden',
           padding: 24,
         }}
       >
-        <Paper>
+        <Paper
+          style={{
+            display: 'flex',
+            flex: '1 1 0',
+            flexDirection: 'column',
+            minHeight: 0,
+            overflow: 'hidden',
+          }}
+        >
           <div
             style={{
               alignItems: 'center',
@@ -187,7 +206,15 @@ export default function ParallelForIterationList({
               {visibleIterations.length} of {iterations.length} items
             </span>
           </div>
-          <TableContainer>
+          <TableContainer
+            data-testid='ParallelForIterationScrollContainer'
+            style={{
+              flex: '1 1 0',
+              minHeight: 0,
+              overflow: 'auto',
+              overscrollBehavior: 'contain',
+            }}
+          >
             <Table aria-label='ParallelFor items' stickyHeader={true}>
               <TableHead>
                 <TableRow>
@@ -218,31 +245,43 @@ export default function ParallelForIterationList({
                       Status
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell align='right'>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {pagedIterations.map(iteration => (
-                  <TableRow hover={true} key={iteration.node.id}>
+                  <TableRow
+                    hover={true}
+                    key={iteration.node.id}
+                    onClick={() => onIterationOpen(iteration.node)}
+                    style={{ cursor: 'pointer' }}
+                  >
                     <TableCell>{iteration.iterationIndex}</TableCell>
-                    <TableCell style={{ fontWeight: 500, wordBreak: 'break-word' }}>
-                      {iteration.node.data!.label}
+                    <TableCell>
+                      <ButtonBase
+                        aria-label={`Open Sub-DAG for ${iteration.node.data!.label}`}
+                        focusRipple={true}
+                        onClick={event => {
+                          event.stopPropagation();
+                          onIterationOpen(iteration.node);
+                        }}
+                        style={{
+                          color: color.link,
+                          fontWeight: 500,
+                          justifyContent: 'flex-start',
+                          textAlign: 'left',
+                          width: '100%',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {iteration.node.data!.label}
+                      </ButtonBase>
                     </TableCell>
                     <TableCell>{getIterationStatus(iteration.node)}</TableCell>
-                    <TableCell align='right'>
-                      <Button
-                        aria-label={`View details for ${iteration.node.data!.label}`}
-                        color='primary'
-                        onClick={() => onIterationClick(iteration.node)}
-                      >
-                        View
-                      </Button>
-                    </TableCell>
                   </TableRow>
                 ))}
                 {pagedIterations.length === 0 && (
                   <TableRow>
-                    <TableCell align='center' colSpan={4}>
+                    <TableCell align='center' colSpan={3}>
                       No items match the current filters.
                     </TableCell>
                   </TableRow>
@@ -261,6 +300,7 @@ export default function ParallelForIterationList({
             page={page}
             rowsPerPage={rowsPerPage}
             rowsPerPageOptions={[20, 50, 100]}
+            style={{ flexShrink: 0 }}
           />
         </Paper>
       </div>

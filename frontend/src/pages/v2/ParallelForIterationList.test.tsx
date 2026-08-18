@@ -44,16 +44,16 @@ describe('ParallelForIterationList', () => {
   }
 
   function renderList(iterations: ParallelForIteration[] = makeIterations(205)) {
-    const onIterationClick = vi.fn();
+    const onIterationOpen = vi.fn();
     render(
       <ParallelForIterationList
         iterations={iterations}
         layers={['root', 'for-loop-1']}
-        onIterationClick={onIterationClick}
+        onIterationOpen={onIterationOpen}
         onLayersUpdate={vi.fn()}
       />,
     );
-    return onIterationClick;
+    return onIterationOpen;
   }
 
   it('paginates large loops at 50 items per page', () => {
@@ -70,22 +70,43 @@ describe('ParallelForIterationList', () => {
     expect(screen.queryByText('unit-49')).toBeNull();
   });
 
-  it('searches by the exact displayed unit ID and opens its details', () => {
-    const onIterationClick = renderList();
+  it('searches by the exact displayed unit ID and opens its Sub-DAG', () => {
+    const onIterationOpen = renderList();
 
     userEvent.type(screen.getByLabelText('Search items'), 'unit-173');
 
     expect(screen.getByText('1 of 205 items')).not.toBeNull();
     const row = screen.getByText('unit-173').closest('tr');
     expect(row).not.toBeNull();
-    userEvent.click(within(row!).getByRole('button', { name: 'View details for unit-173' }));
+    userEvent.click(within(row!).getByRole('button', { name: 'Open Sub-DAG for unit-173' }));
 
-    expect(onIterationClick).toHaveBeenCalledWith(
+    expect(onIterationOpen).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ label: 'unit-173', mlmdId: 273 }),
         id: 'task.for-loop-1.173',
       }),
     );
+  });
+
+  it('opens a Sub-DAG when the row is clicked', () => {
+    const onIterationOpen = renderList(makeIterations(2));
+
+    userEvent.click(screen.getByText('unit-1').closest('tr')!);
+
+    expect(onIterationOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'task.for-loop-1.1' }),
+    );
+  });
+
+  it('uses one explicit scrolling container for the table rows', () => {
+    renderList();
+
+    const list = screen.getByTestId('ParallelForIterationList');
+    const scrollContainer = screen.getByTestId('ParallelForIterationScrollContainer');
+    expect(list.style.overflow).toBe('hidden');
+    expect(list.style.minHeight).toBe('0');
+    expect(scrollContainer.style.overflow).toBe('auto');
+    expect(scrollContainer.style.minHeight).toBe('0');
   });
 
   it('filters iterations by runtime status', () => {

@@ -38,7 +38,7 @@ import {
   getNodeMlmdInfo,
   updateFlowElementsState,
 } from 'src/lib/v2/DynamicFlow';
-import { convertFlowElements } from 'src/lib/v2/StaticFlow';
+import { convertFlowElements, getTaskKeyFromNodeKey } from 'src/lib/v2/StaticFlow';
 import * as WorkflowUtils from 'src/lib/v2/WorkflowUtils';
 import {
   getArtifactsFromContext,
@@ -163,6 +163,10 @@ export function RunDetailsV2(props: RunDetailsV2Props) {
   const parallelForIterations =
     isSuccess && data ? getParallelForIterations(pipelineSpec, layers, data.executions) : undefined;
 
+  const openParallelForIteration = (node: Node<FlowElementDataBase>) => {
+    layerChange([...layers, getTaskKeyFromNodeKey(node.id)]);
+  };
+
   // Retrieves experiment detail.
   const experimentId = run.experiment_id || null;
   const { data: experiment } = useQuery<V2beta1Experiment, Error>(
@@ -201,7 +205,10 @@ export function RunDetailsV2(props: RunDetailsV2Props) {
         <MD2Tabs selectedTab={selectedTab} tabs={TAB_NAMES} onSwitch={setSelectedTab} />
         {/* DAG tab */}
         {selectedTab === 0 && (
-          <div className={commonCss.page} style={{ position: 'relative', overflow: 'hidden' }}>
+          <div
+            className={commonCss.page}
+            style={{ minHeight: 0, position: 'relative', overflow: 'hidden' }}
+          >
             {parallelForIterations === undefined ? (
               <DagCanvas
                 layers={layers}
@@ -214,7 +221,7 @@ export function RunDetailsV2(props: RunDetailsV2Props) {
               <ParallelForIterationList
                 iterations={parallelForIterations}
                 layers={layers}
-                onIterationClick={selectElement}
+                onIterationOpen={openParallelForIteration}
                 onLayersUpdate={layerChange}
               />
             )}
