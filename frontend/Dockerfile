@@ -32,5 +32,8 @@ WORKDIR /server
 EXPOSE 3000
 RUN npm ci
 RUN npm run build
+RUN mkdir -p /config /etc/config && \
+    chgrp 170 /config /etc/config && \
+    chmod 0770 /config /etc/config
 ENV API_SERVER_ADDRESS http://localhost:3001
 CMD node dist/server.js ../client/ 3000

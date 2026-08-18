@@ -80,6 +80,16 @@ jobs:
           platforms: linux/amd64
           push: false
           tags: kfp-frontend:${{ github.sha }}
+      - name: Verify Charmed Kubeflow filesystem compatibility
+        if: github.event_name == 'push'
+        run: |
+          docker load --input /tmp/kfp-frontend-linux-amd64.tar
+          docker run --rm \
+            --user 584792:584792 \
+            --group-add 170 \
+            --entrypoint sh \
+            kfp-frontend:${{ github.sha }} \
+            -c 'touch /config/config.json /etc/config/viewer-pod-template.json'
       - name: Upload frontend image
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
