@@ -21,6 +21,7 @@ import {
   SubDagFlowElementData,
 } from 'src/components/graph/Constants';
 import { PipelineSpec, PipelineTaskSpec } from 'src/generated/pipeline_spec';
+import { ParameterIteratorSpec_ItemsSpec } from 'src/generated/pipeline_spec/pipeline_spec';
 import {
   buildDag,
   buildGraphLayout,
@@ -40,6 +41,12 @@ export const TASK_NAME_KEY = 'task_name';
 export const PARENT_DAG_ID_KEY = 'parent_dag_id';
 export const ITERATION_COUNT_KEY = 'iteration_count';
 export const ITERATION_INDEX_KEY = 'iteration_index';
+const INPUTS_KEY = 'inputs';
+
+export interface ParallelForIteration {
+  iterationIndex: number;
+  node: Node<FlowElementDataBase>;
+}
 
 export function convertSubDagToRuntimeFlowElements(
   spec: PipelineSpec,
@@ -143,6 +150,156 @@ function getExecutionLayers(layers: string[], executions: Execution[]) {
     exectuionLayers.push(executions[0]);
   }
   return exectuionLayers;
+}
+
+/**
+ * Returns list-ready iteration data when the selected layer is a ParallelFor DAG.
+ * Returns undefined for every other layer so callers can retain the graph view.
+ */
+export function getParallelForIterations(
+  spec: PipelineSpec,
+  layers: string[],
+  executions: Execution[],
+): ParallelForIteration[] | undefined {
+  const executionLayers = getExecutionLayers(layers, executions);
+  if (!canvasIsParallelForDag(executionLayers, layers)) {
+    return undefined;
+  }
+
+  const parallelForExecution = executionLayers[executionLayers.length - 1];
+  const customProperties = parallelForExecution.getCustomPropertiesMap();
+  const taskName = customProperties.get(TASK_NAME_KEY)?.getStringValue();
+  const iterationCount = customProperties.get(ITERATION_COUNT_KEY)?.getIntValue();
+  if (!taskName || iterationCount === undefined || iterationCount < 0) {
+    return [];
+  }
+
+  const taskSpec = getTaskSpecForLayer(spec, layers);
+  const iterator = taskSpec?.parameterIterator;
+  const allItems = iterator ? getIteratorItems(iterator.items, parallelForExecution) : undefined;
+  const iterationExecutions = (getTaskNameToExecution(executions).get(taskName) || []).filter(
+    execution =>
+      execution
+        .getCustomPropertiesMap()
+        .get(PARENT_DAG_ID_KEY)
+        ?.getIntValue() === parallelForExecution.getId(),
+  );
+  const executionByIteration = new Map<number, Execution>();
+  iterationExecutions.forEach(execution => {
+    const index = execution
+      .getCustomPropertiesMap()
+      .get(ITERATION_INDEX_KEY)
+      ?.getIntValue();
+    if (index === undefined) {
+      return;
+    }
+    const existingExecution = executionByIteration.get(index);
+    if (!existingExecution || existingExecution.getId() < execution.getId()) {
+      executionByIteration.set(index, execution);
+    }
+  });
+
+  const result: ParallelForIteration[] = [];
+  for (let index = 0; index < iterationCount; index++) {
+    const iterationExecution = executionByIteration.get(index);
+    const itemFromCollection = allItems && index < allItems.length ? allItems[index] : undefined;
+    const itemFromExecution =
+      iterator && iterationExecution
+        ? getExecutionInputs(iterationExecution)?.[iterator.itemInput]
+        : undefined;
+    const displayName = formatIterationItem(
+      itemFromCollection !== undefined ? itemFromCollection : itemFromExecution,
+      `${taskName}.${index}`,
+    );
+    const iterationNodeName = `${taskName}.${index}`;
+    const node: Node<FlowElementDataBase> = {
+      id: getTaskNodeKey(iterationNodeName),
+      data: {
+        label: displayName,
+        mlmdId: iterationExecution?.getId(),
+        state: iterationExecution?.getLastKnownState(),
+        taskType: TaskType.DAG,
+      },
+      position: { x: 0, y: 0 },
+      type: NodeTypeNames.SUB_DAG,
+    };
+    result.push({ iterationIndex: index, node });
+  }
+  return result;
+}
+
+function getTaskSpecForLayer(spec: PipelineSpec, layers: string[]): PipelineTaskSpec | undefined {
+  if (layers.length < 2) {
+    return undefined;
+  }
+
+  let componentSpec = spec.root;
+  for (let index = 1; index < layers.length - 1; index++) {
+    const layer = layers[index];
+    if (layer.indexOf('.') > 0) {
+      continue;
+    }
+    const taskSpec = componentSpec?.dag?.tasks[layer];
+    const componentName = taskSpec?.componentRef?.name;
+    if (!componentName) {
+      return undefined;
+    }
+    componentSpec = spec.components[componentName];
+  }
+  return componentSpec?.dag?.tasks[layers[layers.length - 1]];
+}
+
+function getIteratorItems(
+  itemsSpec: ParameterIteratorSpec_ItemsSpec | undefined,
+  parallelForExecution: Execution,
+): unknown[] | undefined {
+  if (!itemsSpec) {
+    return undefined;
+  }
+
+  let items: unknown;
+  if (itemsSpec.raw !== undefined) {
+    items = parseJson(itemsSpec.raw);
+  } else if (itemsSpec.inputParameter !== undefined) {
+    items = getExecutionInputs(parallelForExecution)?.[itemsSpec.inputParameter];
+    if (typeof items === 'string') {
+      items = parseJson(items);
+    }
+  }
+  return Array.isArray(items) ? items : undefined;
+}
+
+function getExecutionInputs(execution: Execution): { [key: string]: unknown } | undefined {
+  const inputs = execution
+    .getCustomPropertiesMap()
+    .get(INPUTS_KEY)
+    ?.getStructValue();
+  return inputs?.toJavaScript() as { [key: string]: unknown } | undefined;
+}
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function formatIterationItem(item: unknown, fallback: string): string {
+  if (item === undefined) {
+    return fallback;
+  }
+  if (typeof item === 'string') {
+    return item;
+  }
+  if (typeof item === 'number' || typeof item === 'boolean' || item === null) {
+    return String(item);
+  }
+  try {
+    return JSON.stringify(item);
+  } catch {
+    return fallback;
+  }
 }
 
 function buildParallelForDag(rootDagExecution: Execution): Elements {
@@ -258,6 +415,7 @@ export function updateFlowElementsState(
       });
       if (matchedExecs && matchedExecs.length > 0) {
         (updatedElem.data as SubDagFlowElementData).state = matchedExecs[0].getLastKnownState();
+        (updatedElem.data as SubDagFlowElementData).mlmdId = matchedExecs[0].getId();
       }
       flowGraph.push(updatedElem);
     }
@@ -374,7 +532,12 @@ export function getNodeMlmdInfo(
     const execution = executionId ? executionIdToExectuion.get(executionId) : undefined;
     return { execution, linkedArtifact };
   } else if (NodeTypeNames.SUB_DAG === elem.type) {
-    // TODO: Update sub-dag state based on future design.
+    const executionById = elem.data?.mlmdId
+      ? executionIdToExectuion.get(elem.data.mlmdId)
+      : undefined;
+    if (executionById) {
+      return { execution: executionById };
+    }
     const taskLabel = getTaskLabelByPipelineFlowElement(elem);
     const executions = taskNameToExecution
       .get(taskLabel)

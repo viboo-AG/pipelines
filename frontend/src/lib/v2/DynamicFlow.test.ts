@@ -13,11 +13,15 @@
 // limitations under the License.
 
 import { Node } from 'react-flow-renderer';
+import { Struct } from 'google-protobuf/google/protobuf/struct_pb';
 import { FlowElementDataBase } from 'src/components/graph/Constants';
 import { PipelineSpec } from 'src/generated/pipeline_spec';
 import { Artifact, Event, Execution, Value } from 'src/third_party/mlmd';
 import {
+  getParallelForIterations,
   getNodeMlmdInfo,
+  ITERATION_COUNT_KEY,
+  ITERATION_INDEX_KEY,
   PARENT_DAG_ID_KEY,
   TASK_NAME_KEY,
   updateFlowElementsState,
@@ -27,6 +31,129 @@ import v2YamlTemplateString from 'src/data/test/lightweight_python_functions_v2_
 import jsyaml from 'js-yaml';
 
 describe('DynamicFlow', () => {
+  function parallelForSpec(items: object): PipelineSpec {
+    return PipelineSpec.fromJSON({
+      components: {
+        'comp-for-loop-1': {
+          dag: { tasks: {} },
+        },
+      },
+      pipelineInfo: { name: 'parallel-for-test' },
+      root: {
+        dag: {
+          tasks: {
+            'for-loop-1': {
+              componentRef: { name: 'comp-for-loop-1' },
+              parameterIterator: {
+                itemInput: 'unit_id',
+                items,
+              },
+              taskInfo: { name: 'for-loop-1' },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function execution(
+    id: number,
+    taskName: string,
+    parentDagId?: number,
+    iterationIndex?: number,
+    state: Execution.State = Execution.State.RUNNING,
+  ): Execution {
+    const result = new Execution().setId(id).setLastKnownState(state);
+    result.getCustomPropertiesMap().set(TASK_NAME_KEY, new Value().setStringValue(taskName));
+    if (parentDagId !== undefined) {
+      result.getCustomPropertiesMap().set(PARENT_DAG_ID_KEY, new Value().setIntValue(parentDagId));
+    }
+    if (iterationIndex !== undefined) {
+      result
+        .getCustomPropertiesMap()
+        .set(ITERATION_INDEX_KEY, new Value().setIntValue(iterationIndex));
+    }
+    return result;
+  }
+
+  function setInputs(target: Execution, inputs: object): void {
+    target
+      .getCustomPropertiesMap()
+      .set('inputs', new Value().setStructValue(Struct.fromJavaScript(inputs)));
+  }
+
+  describe('getParallelForIterations', () => {
+    it('maps a large raw item list to iteration nodes and execution state', () => {
+      const unitIds = Array.from({ length: 500 }, (_, index) => `unit-${index}`);
+      const spec = parallelForSpec({ raw: JSON.stringify(unitIds) });
+      const root = execution(1, '');
+      const loop = execution(2, 'for-loop-1', 1);
+      loop
+        .getCustomPropertiesMap()
+        .set(ITERATION_COUNT_KEY, new Value().setIntValue(unitIds.length));
+      const iteration = execution(3, 'for-loop-1', 2, 123, Execution.State.COMPLETE);
+
+      const result = getParallelForIterations(
+        spec,
+        ['root', 'for-loop-1'],
+        [root, loop, iteration],
+      );
+
+      expect(result).toHaveLength(500);
+      expect(result?.[123]).toMatchObject({
+        iterationIndex: 123,
+        node: {
+          data: {
+            label: 'unit-123',
+            mlmdId: 3,
+            state: Execution.State.COMPLETE,
+          },
+          id: 'task.for-loop-1.123',
+          type: NodeTypeNames.SUB_DAG,
+        },
+      });
+      expect(result?.[499].node.data?.label).toBe('unit-499');
+    });
+
+    it('reads items from the ParallelFor execution inputs', () => {
+      const spec = parallelForSpec({ inputParameter: 'unit_ids' });
+      const root = execution(1, '');
+      const loop = execution(2, 'for-loop-1', 1);
+      loop.getCustomPropertiesMap().set(ITERATION_COUNT_KEY, new Value().setIntValue(3));
+      setInputs(loop, { unit_ids: ['alpha', 'beta', 'gamma'] });
+
+      const result = getParallelForIterations(spec, ['root', 'for-loop-1'], [root, loop]);
+
+      expect(result?.map(item => item.node.data?.label)).toEqual(['alpha', 'beta', 'gamma']);
+    });
+
+    it('falls back to iteration inputs and then the internal iteration name', () => {
+      const spec = parallelForSpec({ inputParameter: 'unit_ids' });
+      const root = execution(1, '');
+      const loop = execution(2, 'for-loop-1', 1);
+      loop.getCustomPropertiesMap().set(ITERATION_COUNT_KEY, new Value().setIntValue(2));
+      const firstIteration = execution(3, 'for-loop-1', 2, 0);
+      setInputs(firstIteration, { unit_id: 'unit-from-iteration' });
+
+      const result = getParallelForIterations(
+        spec,
+        ['root', 'for-loop-1'],
+        [root, loop, firstIteration],
+      );
+
+      expect(result?.map(item => item.node.data?.label)).toEqual([
+        'unit-from-iteration',
+        'for-loop-1.1',
+      ]);
+    });
+
+    it('returns undefined outside a ParallelFor layer', () => {
+      expect(
+        getParallelForIterations(parallelForSpec({ raw: '[]' }), ['root'], []),
+      ).toBeUndefined();
+    });
+  });
+
   describe('updateFlowElementsState', () => {
     it('update node status based on MLMD', () => {
       // Prepare MLMD objects.
@@ -158,6 +285,23 @@ describe('DynamicFlow', () => {
         .set(TASK_NAME_KEY, new Value().setStringValue(getTaskKeyFromNodeKey(elem.id)));
       const nodeMlmdInfo = getNodeMlmdInfo(elem, [execution], [], []);
       expect(nodeMlmdInfo).toEqual({ execution });
+    });
+
+    it('sub-DAG execution found by MLMD ID when its node ID includes an iteration', () => {
+      const elem: Node<FlowElementDataBase> = {
+        id: 'task.for-loop-1.42',
+        data: {
+          label: 'unit-42',
+          mlmdId: 7,
+        },
+        type: NodeTypeNames.SUB_DAG,
+        position: { x: 1, y: 2 },
+      };
+      const matchingExecution = execution(7, 'for-loop-1', 2, 42);
+
+      expect(getNodeMlmdInfo(elem, [matchingExecution], [], [])).toEqual({
+        execution: matchingExecution,
+      });
     });
 
     it('artifact not exist', () => {

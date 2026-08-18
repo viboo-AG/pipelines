@@ -34,6 +34,7 @@ import { hasFinishedV2, statusProtoMap } from 'src/lib/StatusUtils';
 import { formatDateString, getRunDurationV2 } from 'src/lib/Utils';
 import {
   convertSubDagToRuntimeFlowElements,
+  getParallelForIterations,
   getNodeMlmdInfo,
   updateFlowElementsState,
 } from 'src/lib/v2/DynamicFlow';
@@ -51,6 +52,7 @@ import { classes } from 'typestyle';
 import { RunDetailsProps } from './RunDetails';
 import { statusToIcon } from './StatusV2';
 import DagCanvas from './v2/DagCanvas';
+import ParallelForIterationList from './v2/ParallelForIterationList';
 
 const QUERY_STALE_TIME = 10000; // 10000 milliseconds == 10 seconds.
 const QUERY_REFETCH_INTERNAL = 10000; // 10000 milliseconds == 10 seconds.
@@ -123,10 +125,15 @@ export function RunDetailsV2(props: RunDetailsV2Props) {
 
   const layerChange = (layers: string[]) => {
     setSelectedNode(null);
+    setSelectedNodeMlmdInfo(null);
     setLayers(layers);
+    const executions = data ? data.executions : [];
+    const iterations = getParallelForIterations(pipelineSpec, layers, executions);
     setFlowElements(
-      convertSubDagToRuntimeFlowElements(pipelineSpec, layers, data ? data.executions : []),
-    ); // render elements in the sub-layer.
+      iterations === undefined
+        ? convertSubDagToRuntimeFlowElements(pipelineSpec, layers, executions)
+        : [],
+    );
   };
 
   let dynamicFlowElements = flowElements;
@@ -140,7 +147,7 @@ export function RunDetailsV2(props: RunDetailsV2Props) {
     );
   }
 
-  const onElementSelection = (event: ReactMouseEvent, element: Node | Edge) => {
+  const selectElement = (element: Node | Edge) => {
     setSelectedNode(element);
     if (data) {
       setSelectedNodeMlmdInfo(
@@ -148,6 +155,13 @@ export function RunDetailsV2(props: RunDetailsV2Props) {
       );
     }
   };
+
+  const onElementSelection = (event: ReactMouseEvent, element: Node | Edge) => {
+    selectElement(element);
+  };
+
+  const parallelForIterations =
+    isSuccess && data ? getParallelForIterations(pipelineSpec, layers, data.executions) : undefined;
 
   // Retrieves experiment detail.
   const experimentId = run.experiment_id || null;
@@ -188,13 +202,22 @@ export function RunDetailsV2(props: RunDetailsV2Props) {
         {/* DAG tab */}
         {selectedTab === 0 && (
           <div className={commonCss.page} style={{ position: 'relative', overflow: 'hidden' }}>
-            <DagCanvas
-              layers={layers}
-              onLayersUpdate={layerChange}
-              elements={dynamicFlowElements}
-              onElementClick={onElementSelection}
-              setFlowElements={elems => setFlowElements(elems)}
-            ></DagCanvas>
+            {parallelForIterations === undefined ? (
+              <DagCanvas
+                layers={layers}
+                onLayersUpdate={layerChange}
+                elements={dynamicFlowElements}
+                onElementClick={onElementSelection}
+                setFlowElements={elems => setFlowElements(elems)}
+              ></DagCanvas>
+            ) : (
+              <ParallelForIterationList
+                iterations={parallelForIterations}
+                layers={layers}
+                onIterationClick={selectElement}
+                onLayersUpdate={layerChange}
+              />
+            )}
 
             {/* Side panel for Execution, Artifact, Sub-DAG. */}
             <div className='z-20'>

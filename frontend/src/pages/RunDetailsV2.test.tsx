@@ -16,6 +16,7 @@
 
 import { act, queryByText, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Struct } from 'google-protobuf/google/protobuf/struct_pb';
 
 import * as React from 'react';
 import { V2beta1Run, V2beta1RuntimeState } from 'src/apisv2beta1/run';
@@ -28,15 +29,23 @@ import { expectErrors, mockResizeObserver, testBestPractices } from 'src/TestUti
 import { CommonTestWrapper } from 'src/TestWrapper';
 import {
   Context,
+  Execution,
   GetContextByTypeAndNameRequest,
   GetContextByTypeAndNameResponse,
   GetExecutionsByContextResponse,
+  Value,
 } from 'src/third_party/mlmd';
 import * as metadataStoreServicePb from 'src/third_party/mlmd/generated/ml_metadata/proto/metadata_store_service_pb';
 import { PageProps } from './Page';
 import { RunDetailsInternalProps } from './RunDetails';
 import { RunDetailsV2 } from './RunDetailsV2';
 import v2YamlTemplateString from 'src/data/test/lightweight_python_functions_v2_pipeline_rev.yaml?raw';
+import {
+  ITERATION_COUNT_KEY,
+  ITERATION_INDEX_KEY,
+  PARENT_DAG_ID_KEY,
+  TASK_NAME_KEY,
+} from 'src/lib/v2/DynamicFlow';
 
 vi.mock('src/components/Editor', () => ({
   default: ({ value }: { value?: string }) => <pre data-testid='Editor'>{value}</pre>,
@@ -119,6 +128,10 @@ describe('RunDetailsV2', () => {
     vi.spyOn(Api.getInstance().metadataStoreService, 'getArtifactTypes').mockResolvedValue(
       new metadataStoreServicePb.GetArtifactTypesResponse(),
     );
+    vi.spyOn(Api.getInstance().metadataStoreService, 'getArtifactsByID').mockResolvedValue(
+      new metadataStoreServicePb.GetArtifactsByIDResponse(),
+    );
+    vi.spyOn(Apis.experimentServiceApiV2, 'getExperiment').mockResolvedValue({});
   });
 
   it('Render detail page with reactflow', async () => {
@@ -132,6 +145,77 @@ describe('RunDetailsV2', () => {
       </CommonTestWrapper>,
     );
     expect(screen.getByTestId('DagCanvas')).not.toBeNull();
+  });
+
+  it('replaces an expanded ParallelFor graph with a searchable item list', async () => {
+    const unitIds = Array.from({ length: 205 }, (_, index) => `unit-${index}`);
+    const pipelineWithLoop = `
+pipelineInfo:
+  name: parallel-for-test
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.16.0
+deploymentSpec: {}
+components:
+  comp-for-loop-1:
+    dag:
+      tasks: {}
+root:
+  dag:
+    tasks:
+      for-loop-1:
+        componentRef:
+          name: comp-for-loop-1
+        parameterIterator:
+          itemInput: unit_id
+          items:
+            inputParameter: unit_ids
+        taskInfo:
+          name: for-loop-1
+`;
+    const root = new Execution().setId(1).setLastKnownState(Execution.State.RUNNING);
+    root.getCustomPropertiesMap().set(TASK_NAME_KEY, new Value().setStringValue(''));
+    const loop = new Execution().setId(2).setLastKnownState(Execution.State.RUNNING);
+    loop
+      .getCustomPropertiesMap()
+      .set(TASK_NAME_KEY, new Value().setStringValue('for-loop-1'))
+      .set(PARENT_DAG_ID_KEY, new Value().setIntValue(1))
+      .set(ITERATION_COUNT_KEY, new Value().setIntValue(unitIds.length))
+      .set('inputs', new Value().setStructValue(Struct.fromJavaScript({ unit_ids: unitIds })));
+    const iteration = new Execution().setId(3).setLastKnownState(Execution.State.COMPLETE);
+    iteration
+      .getCustomPropertiesMap()
+      .set(TASK_NAME_KEY, new Value().setStringValue('for-loop-1'))
+      .set(PARENT_DAG_ID_KEY, new Value().setIntValue(2))
+      .set(ITERATION_INDEX_KEY, new Value().setIntValue(173));
+    const executionsResponse = new GetExecutionsByContextResponse();
+    executionsResponse.setExecutionsList([root, loop, iteration]);
+    vi.spyOn(Api.getInstance().metadataStoreService, 'getExecutionsByContext').mockResolvedValue(
+      executionsResponse,
+    );
+    vi.spyOn(Apis.experimentServiceApiV2, 'getExperiment').mockResolvedValue(TEST_EXPERIMENT);
+
+    render(
+      <CommonTestWrapper>
+        <RunDetailsV2
+          pipeline_job={pipelineWithLoop}
+          run={TEST_RUN}
+          {...generateProps()}
+        ></RunDetailsV2>
+      </CommonTestWrapper>,
+    );
+
+    const loopNode = await screen.findByTitle('for-loop-1');
+    const icons = loopNode.querySelectorAll('svg');
+    const expandButton = icons[icons.length - 1].parentElement?.parentElement;
+    expect(expandButton).not.toBeNull();
+    userEvent.click(expandButton!);
+
+    await waitFor(() => expect(screen.getByTestId('ParallelForIterationList')).not.toBeNull());
+    expect(screen.getByText('205 of 205 items')).not.toBeNull();
+    userEvent.type(screen.getByLabelText('Search items'), 'unit-173');
+    userEvent.click(screen.getByRole('button', { name: 'View details for unit-173' }));
+
+    expect(screen.getByText('Open Sub-DAG')).not.toBeNull();
   });
 
   it('Shows error banner when disconnected from MLMD', async () => {
