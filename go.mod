@@ -55,7 +55,7 @@ require (
 	// https://pkg.go.dev/google.golang.org/genproto/googleapis/rpc?tab=versions
 	google.golang.org/genproto/googleapis/api v0.0.0-20260630182238-925bb5da69e7
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260724162435-b2f20204f0df
-	google.golang.org/grpc v1.83.0
+	google.golang.org/grpc v1.83.1
 	// These runtime protoc-gen-go-grpc & protobuf versions should be identical to the package versions
 	// used for the generated code (see PROTOC_GEN_GO_GRPC & PROTOBUF_GO in backend/api/Dockerfile)
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.6.2
