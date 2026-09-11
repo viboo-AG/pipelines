@@ -3,6 +3,7 @@ name: Viboo downstream CI
 on:
   push:
     branches:
+      - "fix/**"
       - "release/**"
 
 permissions:
@@ -27,17 +28,35 @@ jobs:
         run: |
           gofmt -w \
             backend/src/v2/compiler/argocompiler/argo.go \
+            backend/src/v2/compiler/argocompiler/common.go \
+            backend/src/v2/compiler/argocompiler/dag.go \
             backend/src/v2/compiler/argocompiler/container.go \
-            backend/src/v2/compiler/argocompiler/container_test.go
+            backend/src/v2/compiler/argocompiler/container_test.go \
+            backend/src/v2/compiler/argocompiler/resilience_test.go \
+            backend/src/v2/driver/container.go \
+            backend/src/v2/driver/dag.go \
+            backend/src/v2/driver/root_dag.go \
+            backend/src/v2/driver/k8s.go \
+            backend/src/v2/metadata/client.go \
+            backend/src/v2/metadata/driver_retry_test.go
           git diff --exit-code
       - name: Run compiler unit tests
-        run: go test ./backend/src/v2/compiler/argocompiler
+        run: go test ./backend/src/v2/compiler/argocompiler ./backend/src/apiserver/template ./backend/src/v2/driver ./backend/src/v2/metadata
       - name: Build API server
         run: go build -o apiserver backend/src/apiserver/*.go
+      - name: Build driver
+        run: CGO_ENABLED=0 go build -tags netgo -o driver backend/src/v2/cmd/driver/*.go
       - name: Upload API server
         uses: actions/upload-artifact@v4
         with:
           name: kfp-api-server-linux-amd64
           path: apiserver
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload driver
+        uses: actions/upload-artifact@v4
+        with:
+          name: kfp-driver-linux-amd64
+          path: driver
           if-no-files-found: error
           retention-days: 30

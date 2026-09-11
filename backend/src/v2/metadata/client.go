@@ -18,6 +18,7 @@ package metadata
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -583,6 +584,43 @@ const (
 	keyIterationCount        = "iteration_count"
 	keyTotalDagTasks         = "total_dag_tasks"
 )
+
+// CreateExecutionForDriver gives retries of one logical driver invocation the
+// same execution identity. MLMD enforces name uniqueness atomically, including
+// when the original write commits but its response is lost.
+// Reusing a record must not reset its state, outputs, or artifact associations.
+func (c *Client) CreateExecutionForDriver(ctx context.Context, pipeline *Pipeline, config *ExecutionConfig) (*Execution, error) {
+	if config == nil {
+		return nil, fmt.Errorf("metadata.CreateExecutionForDriver got config == nil")
+	}
+	named := *config
+	if named.Name == "" {
+		if named.ParentDagID == 0 || named.TaskName == "" {
+			return nil, fmt.Errorf("driver execution requires a name or a parent DAG and task name")
+		}
+		iteration := -1
+		if named.IterationIndex != nil {
+			iteration = *named.IterationIndex
+		}
+		identity := fmt.Sprintf("%d/%d/%s", named.ParentDagID, iteration, named.TaskName)
+		named.Name = fmt.Sprintf("task/%x", sha256.Sum256([]byte(identity)))
+	}
+	execution, err := c.CreateExecution(ctx, pipeline, &named)
+	if status.Code(err) != codes.AlreadyExists {
+		return execution, err
+	}
+	existing, err := c.svc.GetExecutionByTypeAndName(ctx, &pb.GetExecutionByTypeAndNameRequest{
+		TypeName:      proto.String(string(named.ExecutionType)),
+		ExecutionName: &named.Name,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reuse driver execution %q: %w", named.Name, err)
+	}
+	if existing.GetExecution().GetId() == 0 {
+		return nil, fmt.Errorf("driver execution %q already exists but was not returned", named.Name)
+	}
+	return &Execution{pipeline: pipeline, execution: existing.GetExecution()}, nil
+}
 
 // CreateExecution creates a new MLMD execution under the specified Pipeline.
 func (c *Client) CreateExecution(ctx context.Context, pipeline *Pipeline, config *ExecutionConfig) (*Execution, error) {

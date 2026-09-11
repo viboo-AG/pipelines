@@ -7,7 +7,7 @@
 
 ### Document metadata
 
-- Last updated: 2026-01-20
+- Last updated: 2026-09-10
 - Scope: KFP master branch (v2 engine), backend (Go), SDK (Python), frontend (React 16)
 
 ### Maintenance (agents and contributors)
@@ -149,6 +149,15 @@ KFP supports two main deployment modes:
 
 ## Local testing
 
+The downstream driver admission and retry checks are in `backend/src/v2/compiler/argocompiler/resilience_test.go`.
+Run `go test ./backend/src/v2/compiler/argocompiler ./backend/src/apiserver/template ./backend/src/v2/driver ./backend/src/v2/metadata` after changing these defaults.
+The two driver templates use two retries with a fixed 30-minute backoff and no overall deadline.
+KFP-generated pods default to the Istio opt-out label, while explicit executor labels and legacy annotation opt-ins are preserved.
+Drivers use `CreateExecutionForDriver` to reuse a stable MLMD execution after a partial attempt.
+Its regression tests in `backend/src/v2/metadata/driver_retry_test.go` cover ambiguous writes and preservation of completed outputs.
+Build the corresponding driver with `docker build --platform linux/amd64 -f backend/Dockerfile.viboo-driver .`.
+The downstream CI checks formatting and tests for the compiler, drivers, and metadata client, and builds both API server and driver binaries.
+
 - Python (SDK):
 
 ```bash
@@ -279,6 +288,11 @@ make -C api python && make -C api golang
 ### 🚫 NEVER EDIT DIRECTLY (Generated files)
 
 The following files are generated; edit their sources and regenerate:
+
+- `test_data/compiled-workflows/*.yaml`
+  - Sources: `test_data/pipeline_files/valid/` and `backend/src/v2/compiler/argocompiler/`.
+  - Generate: `go test ./backend/test/compiler -args -updateCompiledFiles=true`.
+  - Verify without updating: `go test ./backend/test/compiler -args -createGoldenFiles=false`.
 
 - `api/v2alpha1/python/kfp/pipeline_spec/pipeline_spec_pb2.py`
   - Source: `api/v2alpha1/pipeline_spec.proto`

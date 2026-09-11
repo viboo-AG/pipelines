@@ -19,7 +19,23 @@ import (
 	"github.com/golang/glog"
 	"github.com/kubeflow/pipelines/backend/src/apiserver/common"
 	k8score "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
+
+// driverRetryStrategy keeps transient infrastructure failures inside the current
+// driver invocation without restarting its DAG or changing executor task retries.
+func driverRetryStrategy() *wfapi.RetryStrategy {
+	limit := intstr.FromInt(2)
+	factor := intstr.FromInt(1)
+	return &wfapi.RetryStrategy{
+		Limit:       &limit,
+		RetryPolicy: wfapi.RetryPolicyAlways,
+		Backoff: &wfapi.Backoff{
+			Duration: "30m",
+			Factor:   &factor,
+		},
+	}
+}
 
 const (
 	MLPipelineTLSEnabledEnvVar  = "ML_PIPELINE_TLS_ENABLED"

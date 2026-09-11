@@ -616,7 +616,8 @@ func (c *workflowCompiler) addDAGDriverTemplate() string {
 	}
 
 	template := &wfapi.Template{
-		Name: name,
+		Name:          name,
+		RetryStrategy: driverRetryStrategy(),
 		Inputs: wfapi.Inputs{
 			Parameters: []wfapi.Parameter{
 				{Name: paramComponent}, // Required.

@@ -1,0 +1,15 @@
+FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS builder
+
+WORKDIR /go/src/github.com/kubeflow/pipelines
+COPY go.mod go.sum ./
+COPY kubernetes_platform/go.mod kubernetes_platform/go.mod
+COPY api/go.mod api/go.mod
+RUN go mod download
+
+COPY . .
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags netgo -o /driver ./backend/src/v2/cmd/driver/*.go
+
+FROM docker.io/charmedkubeflow/kfp-driver@sha256:47fbf2dc034e34466b0cc60d7950b7f4b1cd8c5e44feb7eae28c492459524b69
+COPY --from=builder /driver /usr/bin/driver
