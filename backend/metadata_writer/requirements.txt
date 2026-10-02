@@ -32,7 +32,7 @@ lru-dict==1.4.1
     # via -r requirements.in
 ml-metadata==1.21.0
     # via -r requirements.in
-oauthlib==3.3.1
+oauthlib==4.0.0
     # via
     #   kubernetes
     #   requests-oauthlib
