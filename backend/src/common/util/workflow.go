@@ -266,6 +266,11 @@ func (w *Workflow) GenerateRetryExecution() (ExecutionSpec, []string, error) {
 		node.OutboundNodes = outboundNodes
 		newWF.Status.Nodes[node.ID] = node
 	}
+	// The stored workflow may have compressed nodes. Recompress retained nodes
+	// before updating Kubernetes, or large retries can exceed etcd's object limit.
+	if err := packer.CompressWorkflowIfNeeded(newWF); err != nil {
+		return nil, nil, err
+	}
 	return NewWorkflow(newWF), podsToDelete, nil
 }
 
