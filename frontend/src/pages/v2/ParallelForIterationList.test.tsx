@@ -121,6 +121,53 @@ describe('ParallelForIterationList', () => {
     expect(screen.queryByText('unit-1')).toBeNull();
   });
 
+  it('shows counts for the four summary statuses and filters through each count', () => {
+    const iterations = makeIterations(5);
+    iterations[0].node.data!.state = undefined;
+    iterations[1].node.data!.state = Execution.State.RUNNING;
+    iterations[2].node.data!.state = Execution.State.COMPLETE;
+    iterations[3].node.data!.state = Execution.State.FAILED;
+    iterations[4].node.data!.state = Execution.State.NEW;
+    renderList(iterations);
+
+    expect(screen.getByRole('button', { name: 'Not started: 1' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Running: 1' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Complete: 1' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Failed: 1' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /Pending:/ })).toBeNull();
+
+    userEvent.click(screen.getByRole('button', { name: 'Running: 1' }));
+    expect(screen.getByText('1 of 5 items')).not.toBeNull();
+    expect(screen.getByText('unit-1')).not.toBeNull();
+    expect(screen.queryByText('unit-2')).toBeNull();
+    expect(screen.getByLabelText('Filter by status')).toHaveTextContent('Running');
+    expect(screen.getByRole('button', { name: 'Running: 1' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    userEvent.click(screen.getByRole('button', { name: 'Not started: 1' }));
+    expect(screen.getByText('unit-0')).not.toBeNull();
+    expect(screen.getByLabelText('Filter by status')).toHaveTextContent('Not started');
+
+    userEvent.click(screen.getByRole('button', { name: 'Complete: 1' }));
+    expect(screen.getByText('unit-2')).not.toBeNull();
+
+    userEvent.click(screen.getByRole('button', { name: 'Failed: 1' }));
+    expect(screen.getByText('unit-3')).not.toBeNull();
+  });
+
+  it('keeps counts across filters and allows selecting an empty status', () => {
+    renderList(makeIterations(2));
+
+    userEvent.click(screen.getByRole('button', { name: 'Running: 0' }));
+    expect(screen.getByText('0 of 2 items')).not.toBeNull();
+    expect(screen.getByText('No items match the current filters.')).not.toBeNull();
+    expect(screen.getByLabelText('Filter by status')).toHaveTextContent('Running');
+    expect(screen.getByRole('button', { name: 'Complete: 1' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Failed: 1' })).not.toBeNull();
+  });
+
   it('sorts items while retaining the iteration as a stable tie-breaker', () => {
     renderList();
 

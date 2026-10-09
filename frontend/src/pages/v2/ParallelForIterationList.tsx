@@ -51,6 +51,8 @@ const STATUS_OPTIONS = [
   'Canceled',
   'Unknown',
 ];
+const SUMMARY_STATUSES = ['Not started', 'Running', 'Complete', 'Failed'] as const;
+type SummaryStatus = typeof SUMMARY_STATUSES[number];
 
 type SortField = 'item' | 'iteration' | 'status';
 type SortDirection = 'asc' | 'desc';
@@ -74,6 +76,22 @@ export default function ParallelForIterationList({
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<SummaryStatus, number> = {
+      'Not started': 0,
+      Running: 0,
+      Complete: 0,
+      Failed: 0,
+    };
+    for (const iteration of iterations) {
+      const status = getIterationStatus(iteration.node);
+      if (status in counts) {
+        counts[status as SummaryStatus]++;
+      }
+    }
+    return counts;
+  }, [iterations]);
 
   const visibleIterations = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase();
@@ -182,25 +200,44 @@ export default function ParallelForIterationList({
                 value={search}
                 variant='outlined'
               />
-              <TextField
-                SelectProps={{ inputProps: { 'aria-label': 'Filter by status' } }}
-                label='Status'
-                onChange={event => {
-                  setStatusFilter(event.target.value);
-                  setPage(0);
-                }}
-                select={true}
-                size='small'
-                value={statusFilter}
-                variant='outlined'
-              >
-                <MenuItem value={ALL_STATUSES}>{ALL_STATUSES}</MenuItem>
-                {STATUS_OPTIONS.map(status => (
-                  <MenuItem key={status} value={status}>
-                    {status}
-                  </MenuItem>
+              <div style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                <TextField
+                  SelectProps={{ inputProps: { 'aria-label': 'Filter by status' } }}
+                  label='Status'
+                  onChange={event => {
+                    setStatusFilter(event.target.value);
+                    setPage(0);
+                  }}
+                  select={true}
+                  size='small'
+                  value={statusFilter}
+                  variant='outlined'
+                >
+                  <MenuItem value={ALL_STATUSES}>{ALL_STATUSES}</MenuItem>
+                  {STATUS_OPTIONS.map(status => (
+                    <MenuItem key={status} value={status}>
+                      {status}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                {SUMMARY_STATUSES.map(status => (
+                  <ButtonBase
+                    aria-pressed={statusFilter === status}
+                    key={status}
+                    onClick={() => {
+                      setStatusFilter(status);
+                      setPage(0);
+                    }}
+                    style={{
+                      color: color.link,
+                      fontWeight: statusFilter === status ? 600 : 400,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {status}: {statusCounts[status]}
+                  </ButtonBase>
                 ))}
-              </TextField>
+              </div>
             </div>
             <span aria-live='polite'>
               {visibleIterations.length} of {iterations.length} items
