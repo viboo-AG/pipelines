@@ -393,7 +393,7 @@ webencodings==0.5.1
     # via
     #   bleach
     #   tinycss2
-werkzeug==3.1.6
+werkzeug==3.1.9
     # via -r requirements.in
 wheel==0.46.2
     # via astunparse
