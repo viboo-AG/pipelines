@@ -15,9 +15,12 @@
 package util
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	workflowapi "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
+	"github.com/argoproj/argo-workflows/v3/workflow/packer"
 	swfapi "github.com/kubeflow/pipelines/backend/src/crd/pkg/apis/scheduledworkflow/v1beta1"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -224,6 +227,53 @@ func TestToStringForStore(t *testing.T) {
 	assert.Equal(t,
 		"{\"metadata\":{\"name\":\"WORKFLOW_NAME\",\"creationTimestamp\":null},\"spec\":{\"arguments\":{}},\"status\":{\"startedAt\":null,\"finishedAt\":null}}",
 		workflow.ToStringForStore())
+}
+
+func TestGenerateRetryExecutionRecompressesLargeNodeStatus(t *testing.T) {
+	t.Setenv("MAX_WORKFLOW_SIZE", "1048576")
+	nodes := make(map[string]workflowapi.NodeStatus)
+	for i := 0; i < 1600; i++ {
+		id := fmt.Sprintf("node-%d", i)
+		nodes[id] = workflowapi.NodeStatus{
+			ID:      id,
+			Name:    "large-retry." + id,
+			Type:    workflowapi.NodeTypePod,
+			Phase:   workflowapi.NodeSucceeded,
+			Message: strings.Repeat("completed ", 64),
+		}
+	}
+	nodes["failed"] = workflowapi.NodeStatus{
+		ID: "failed", Name: "large-retry.failed", Type: workflowapi.NodeTypePod, Phase: workflowapi.NodeFailed,
+	}
+	workflow := NewWorkflow(&workflowapi.Workflow{
+		ObjectMeta: metav1.ObjectMeta{Name: "large-retry", Labels: map[string]string{}},
+		Status: workflowapi.WorkflowStatus{
+			Phase: workflowapi.WorkflowFailed,
+			Nodes: nodes,
+		},
+	})
+	assert.Greater(t, len(workflow.ToStringForStore()), 1024*1024)
+	if !assert.NoError(t, packer.CompressWorkflowIfNeeded(workflow.Workflow)) {
+		return
+	}
+	if !assert.NoError(t, workflow.Decompress()) {
+		return
+	}
+
+	retrySpec, podsToDelete, err := workflow.GenerateRetryExecution()
+	if !assert.NoError(t, err) {
+		return
+	}
+	retry := retrySpec.(*Workflow)
+	assert.Len(t, podsToDelete, 1)
+	assert.Empty(t, retry.Status.Nodes)
+	assert.NotEmpty(t, retry.Status.CompressedNodes)
+	assert.Less(t, len(retry.ToStringForStore()), 1024*1024)
+	if !assert.NoError(t, retry.Decompress()) {
+		return
+	}
+	assert.Len(t, retry.Status.Nodes, 1600)
+	assert.NotContains(t, retry.Status.Nodes, "failed")
 }
 
 func TestToStringForSchedule(t *testing.T) {

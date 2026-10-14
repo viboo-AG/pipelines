@@ -32,6 +32,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/kubeflow/pipelines/api/v2alpha1/go/pipelinespec"
 	"github.com/kubeflow/pipelines/backend/src/apiserver/common"
+	"github.com/kubeflow/pipelines/backend/src/common/util"
 	"github.com/kubeflow/pipelines/backend/src/v2/component"
 	"github.com/kubeflow/pipelines/kubernetes_platform/go/kubernetesplatform"
 	k8score "k8s.io/api/core/v1"
@@ -247,7 +248,8 @@ func (c *workflowCompiler) addContainerDriverTemplate() string {
 	}
 
 	template := &wfapi.Template{
-		Name: name,
+		Name:          name,
+		RetryStrategy: driverRetryStrategy(),
 		Inputs: wfapi.Inputs{
 			Parameters: []wfapi.Parameter{
 				{Name: paramComponent},
@@ -321,6 +323,7 @@ func (c *workflowCompiler) containerExecutorTask(name string, inputs containerEx
 			return nil, fmt.Errorf("failed to unmarshal kubernetes config: %v", err)
 		}
 	}
+	preserveIstioInjectionAnnotation(k8sExecCfg.GetPodMetadata())
 	dagTask := &wfapi.DAGTask{
 		Name:     name,
 		Template: c.addContainerExecutorTemplate(task, k8sExecCfg),
@@ -582,6 +585,26 @@ func (c *workflowCompiler) addContainerExecutorTemplate(task *pipelinespec.Pipel
 	c.templates[nameContainerImpl] = executor
 	c.wf.Spec.Templates = append(c.wf.Spec.Templates, *container, *executor)
 	return nameContainerExecutor
+}
+
+// Preserve legacy Istio annotation overrides as task-level label parameters.
+// Literal template labels can be overwritten by Argo workflow podMetadata defaults.
+// Normalize before choosing the shared metadata template and its input parameters
+// so tasks with different values can safely reuse the same template.
+func preserveIstioInjectionAnnotation(metadata *kubernetesplatform.PodMetadata) {
+	if metadata == nil {
+		return
+	}
+	key := util.AnnotationKeyIstioSidecarInject
+	if _, hasLabel := metadata.GetLabels()[key]; hasLabel {
+		return
+	}
+	if inject, hasAnnotation := metadata.GetAnnotations()[key]; hasAnnotation {
+		if metadata.Labels == nil {
+			metadata.Labels = make(map[string]string)
+		}
+		metadata.Labels[key] = inject
+	}
 }
 
 func (c *workflowCompiler) getTaskRetryParameters(task *pipelinespec.PipelineTaskSpec) []wfapi.Parameter {

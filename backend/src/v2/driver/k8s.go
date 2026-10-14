@@ -780,7 +780,7 @@ func createPVC(
 			if err != nil {
 				return
 			}
-			createdExecution, err = mlmd.CreateExecution(ctx, pipeline, ecfg)
+			createdExecution, err = mlmd.CreateExecutionForDriver(ctx, pipeline, ecfg)
 		}
 	}()
 
@@ -863,7 +863,7 @@ func createPVC(
 
 	// Create execution in MLMD
 	// TODO(Bobgy): change execution state to pending, because this is driver, execution hasn't started.
-	createdExecution, err = mlmd.CreateExecution(ctx, pipeline, ecfg)
+	createdExecution, err = mlmd.CreateExecutionForDriver(ctx, pipeline, ecfg)
 	if err != nil {
 		return "", createdExecution, pb.Execution_FAILED, fmt.Errorf("error creating MLMD execution for createpvc: %w", err)
 	}
@@ -946,7 +946,7 @@ func deletePVC(
 			if err != nil {
 				return
 			}
-			createdExecution, err = mlmd.CreateExecution(ctx, pipeline, ecfg)
+			createdExecution, err = mlmd.CreateExecutionForDriver(ctx, pipeline, ecfg)
 		}
 	}()
 
@@ -979,7 +979,7 @@ func deletePVC(
 
 	// Create execution in MLMD
 	// TODO(Bobgy): change execution state to pending, because this is driver, execution hasn't started.
-	createdExecution, err = mlmd.CreateExecution(ctx, pipeline, ecfg)
+	createdExecution, err = mlmd.CreateExecutionForDriver(ctx, pipeline, ecfg)
 	if err != nil {
 		return createdExecution, pb.Execution_FAILED, fmt.Errorf("error creating MLMD execution for createpvc: %w", err)
 	}

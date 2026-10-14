@@ -148,6 +148,7 @@ func Compile(jobArg *pipelinespec.PipelineJob, kubernetesSpecArg *pipelinespec.S
 				},
 				Labels: map[string]string{
 					"pipelines.kubeflow.org/v2_component": "true",
+					util.AnnotationKeyIstioSidecarInject:  util.AnnotationValueIstioSidecarInjectDisabled,
 				},
 			},
 			Arguments: wfapi.Arguments{
