@@ -158,6 +158,7 @@ Its regression tests in `backend/src/v2/metadata/driver_retry_test.go` cover amb
 Build the corresponding driver with `docker build --platform linux/amd64 -f backend/Dockerfile.viboo-driver .`.
 The downstream CI checks formatting and tests for the compiler, drivers, and metadata client, and builds both API server and driver binaries.
 Run `go test ./backend/src/common/util ./backend/src/apiserver/resource` after changing retry Workflow handling.
+Run `go test ./backend/src/apiserver/resource ./backend/src/apiserver/server` after changing live run status or Argo offloaded node retrieval.
 
 - Python (SDK):
 
@@ -612,6 +613,7 @@ docformatter --check --recursive sdk/python/ --exclude "compiler_test.py"
 ### Common error patterns and quick fixes
 
 - Retry of a large failed run can fail with `etcdserver: request is too large` if KFP expands compressed Workflow nodes and updates Kubernetes without recompressing the retained nodes.
+- If a run has `offloadNodeStatusVersion` but no `nodes` or `compressedNodes`, Argo stored its node map in the persistence database; the run display path must retrieve those nodes before the UI can show unit statuses.
 - Protobuf generation fails with "protoc: command not found": use the Make targets that run this in a container.
 - Protobuf generation fails under SELinux enforcing: temporarily disable with `sudo setenforce 0`; re-enable after.
 - API client generation fails with "Unable to access jarfile swagger-codegen-cli.jar": ensure the JAR is present and use `java -jar <path>/swagger-codegen-cli.jar` from `frontend/`.

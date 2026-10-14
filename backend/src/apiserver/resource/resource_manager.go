@@ -22,6 +22,7 @@ import (
 	"net"
 	"reflect"
 	"strconv"
+	"sync"
 	"time"
 
 	apiv2beta1 "github.com/kubeflow/pipelines/backend/api/v2beta1/go_client"
@@ -146,6 +147,8 @@ type ResourceManager struct {
 	uuid                      util.UUIDGeneratorInterface
 	authenticators            []kfpauth.Authenticator
 	options                   *ResourceManagerOptions
+	offloadedNodeStatusRepo   offloadedNodeStatusReader
+	offloadedNodeStatusMu     sync.Mutex
 }
 
 func NewResourceManager(clientManager ClientManagerInterface, options *ResourceManagerOptions) *ResourceManager {
@@ -727,8 +730,12 @@ func (r *ResourceManager) GetRun(runId string) (*model.Run, error) {
 // eventually garbage collected, so the persisted Workflow remains the historical source.
 func (r *ResourceManager) GetRunForDisplay(ctx context.Context, runId string) (*model.Run, error) {
 	run, err := r.GetRun(runId)
-	if err != nil || run.K8SName == "" {
+	if err != nil {
 		return run, err
+	}
+	if run.K8SName == "" {
+		r.hydrateStoredWorkflowForDisplay(ctx, run)
+		return run, nil
 	}
 	namespace := run.Namespace
 	if namespace == "" && run.ExperimentId != "" {
@@ -742,17 +749,20 @@ func (r *ResourceManager) GetRunForDisplay(ctx context.Context, runId string) (*
 
 	workflow, err := r.getWorkflowClient(namespace).Get(ctx, run.K8SName, v1.GetOptions{})
 	if util.IsNotFound(err) || apierrors.IsNotFound(err) {
+		r.hydrateStoredWorkflowForDisplay(ctx, run)
 		return run, nil
 	}
 	if err != nil {
 		return nil, util.Wrapf(err, "Failed to read live workflow for run %s", runId)
 	}
 	if workflow.ExecutionObjectMeta().Labels[util.LabelKeyWorkflowRunId] != runId {
+		r.hydrateStoredWorkflowForDisplay(ctx, run)
 		return run, nil
 	}
 
 	status := workflow.ExecutionStatus()
 	if status.Condition() == "" {
+		r.hydrateStoredWorkflowForDisplay(ctx, run)
 		return run, nil
 	}
 	state := model.RuntimeState(string(status.Condition())).ToV2()
@@ -762,6 +772,9 @@ func (r *ResourceManager) GetRunForDisplay(ctx context.Context, runId string) (*
 	run.State = state
 	run.Conditions = string(state.ToV1())
 	run.FinishedAtInSec = status.FinishedAt()
+	if argoWorkflow, ok := workflow.(*util.Workflow); ok {
+		workflow = r.hydrateWorkflowForDisplay(ctx, argoWorkflow)
+	}
 	run.WorkflowRuntimeManifest = model.LargeText(workflow.ToStringForStore())
 	return run, nil
 }

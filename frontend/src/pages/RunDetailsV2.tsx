@@ -177,6 +177,12 @@ export function RunDetailsV2(props: RunDetailsV2Props) {
         throw new Error('Run has no Workflow status yet.');
       }
       const parsed = JSON.parse(manifest) as Workflow;
+      const offloadVersion = (parsed.status as Workflow['status'] & {
+        offloadNodeStatusVersion?: string;
+      })?.offloadNodeStatusVersion;
+      if (offloadVersion && !parsed.status?.nodes && !parsed.status?.compressedNodes) {
+        throw new Error('Argo Workflow node status is offloaded and unavailable.');
+      }
       if (!parsed.status?.nodes && parsed.status?.compressedNodes) {
         parsed.status.nodes = (await decodeCompressedNodes(
           parsed.status.compressedNodes,

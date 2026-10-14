@@ -105,6 +105,29 @@ describe('RunDetailsV2', () => {
     display_name: 'Default',
     storage_state: V2beta1ExperimentStorageState.AVAILABLE,
   };
+  const LOOP_PIPELINE = `
+pipelineInfo:
+  name: parallel-for-test
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.16.0
+deploymentSpec: {}
+components:
+  comp-for-loop-1:
+    dag:
+      tasks: {}
+root:
+  dag:
+    tasks:
+      for-loop-1:
+        componentRef:
+          name: comp-for-loop-1
+        parameterIterator:
+          itemInput: unit_id
+          items:
+            inputParameter: unit_ids
+        taskInfo:
+          name: for-loop-1
+`;
   beforeEach(() => {
     mockResizeObserver();
 
@@ -152,29 +175,6 @@ describe('RunDetailsV2', () => {
 
   it('replaces an expanded ParallelFor graph with a searchable item list', async () => {
     const unitIds = Array.from({ length: 205 }, (_, index) => `unit-${index}`);
-    const pipelineWithLoop = `
-pipelineInfo:
-  name: parallel-for-test
-schemaVersion: 2.1.0
-sdkVersion: kfp-2.16.0
-deploymentSpec: {}
-components:
-  comp-for-loop-1:
-    dag:
-      tasks: {}
-root:
-  dag:
-    tasks:
-      for-loop-1:
-        componentRef:
-          name: comp-for-loop-1
-        parameterIterator:
-          itemInput: unit_id
-          items:
-            inputParameter: unit_ids
-        taskInfo:
-          name: for-loop-1
-`;
     const root = new Execution().setId(1).setLastKnownState(Execution.State.RUNNING);
     root.getCustomPropertiesMap().set(TASK_NAME_KEY, new Value().setStringValue(''));
     const loop = new Execution().setId(2).setLastKnownState(Execution.State.RUNNING);
@@ -226,7 +226,7 @@ root:
     render(
       <CommonTestWrapper>
         <RunDetailsV2
-          pipeline_job={pipelineWithLoop}
+          pipeline_job={LOOP_PIPELINE}
           run={TEST_RUN}
           {...generateProps()}
         ></RunDetailsV2>
@@ -249,6 +249,46 @@ root:
     await waitFor(() => expect(screen.getByTestId('DagCanvas')).not.toBeNull());
     expect(screen.queryByTestId('ParallelForIterationList')).toBeNull();
     expect(screen.getByText('for-loop-1.173')).not.toBeNull();
+  });
+
+  it('shows an unavailable warning when Argo has offloaded nodes that the API has not retrieved', async () => {
+    const root = new Execution().setId(1).setLastKnownState(Execution.State.RUNNING);
+    root.getCustomPropertiesMap().set(TASK_NAME_KEY, new Value().setStringValue(''));
+    const loop = new Execution().setId(2).setLastKnownState(Execution.State.RUNNING);
+    loop
+      .getCustomPropertiesMap()
+      .set(TASK_NAME_KEY, new Value().setStringValue('for-loop-1'))
+      .set(PARENT_DAG_ID_KEY, new Value().setIntValue(1))
+      .set(ITERATION_COUNT_KEY, new Value().setIntValue(1))
+      .set('inputs', new Value().setStructValue(Struct.fromJavaScript({ unit_ids: ['unit-0'] })));
+    const executionsResponse = new GetExecutionsByContextResponse();
+    executionsResponse.setExecutionsList([root, loop]);
+    vi.spyOn(Api.getInstance().metadataStoreService, 'getExecutionsByContext').mockResolvedValue(
+      executionsResponse,
+    );
+    vi.spyOn(Apis.runServiceApi, 'getRun').mockResolvedValue({
+      pipeline_runtime: {
+        workflow_manifest: JSON.stringify({
+          metadata: { name: 'training-abc' },
+          status: { phase: 'Running', offloadNodeStatusVersion: 'fnv:123' },
+        }),
+      },
+    });
+
+    render(
+      <CommonTestWrapper>
+        <RunDetailsV2 pipeline_job={LOOP_PIPELINE} run={TEST_RUN} {...generateProps()} />
+      </CommonTestWrapper>,
+    );
+    const loopNode = await screen.findByTitle('for-loop-1');
+    const icons = loopNode.querySelectorAll('svg');
+    userEvent.click(icons[icons.length - 1].parentElement!.parentElement!);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('Workflow unit statuses are unavailable. Retrying automatically.'),
+      ).not.toBeNull(),
+    );
   });
 
   it('Shows error banner when disconnected from MLMD', async () => {
