@@ -7,7 +7,7 @@
 
 ### Document metadata
 
-- Last updated: 2026-01-20
+- Last updated: 2026-10-14
 - Scope: KFP master branch (v2 engine), backend (Go), SDK (Python), frontend (React 16)
 
 ### Maintenance (agents and contributors)
@@ -377,6 +377,8 @@ For full integration testing against a real KFP deployment:
 
 ### Key technologies and architecture
 
+- Run detail reads the live Argo Workflow through the KFP API while it exists, then uses the persisted Workflow snapshot after garbage collection.
+- ParallelFor unit IDs and drill-down come from ML Metadata, while their displayed states, counts, and filters come from the corresponding Argo iteration DAG nodes.
 - **React 16** with TypeScript
 - **Material-UI v3** for components
 - **React Router v5** for navigation

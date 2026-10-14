@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import * as React from 'react';
-import { MouseEvent as ReactMouseEvent, useEffect, useState } from 'react';
+import { MouseEvent as ReactMouseEvent, useEffect, useMemo, useState } from 'react';
 import { Edge, FlowElement, Node } from 'react-flow-renderer';
 import { useQuery } from 'react-query';
 import { V2beta1Experiment } from 'src/apisv2beta1/experiment';
@@ -31,7 +31,7 @@ import { Apis } from 'src/lib/Apis';
 import Buttons, { ButtonKeys } from 'src/lib/Buttons';
 import { KeyValue } from 'src/lib/StaticGraphParser';
 import { hasFinishedV2, statusProtoMap } from 'src/lib/StatusUtils';
-import { formatDateString, getRunDurationV2 } from 'src/lib/Utils';
+import { decodeCompressedNodes, formatDateString, getRunDurationV2 } from 'src/lib/Utils';
 import {
   convertSubDagToRuntimeFlowElements,
   getParallelForIterations,
@@ -40,6 +40,7 @@ import {
 } from 'src/lib/v2/DynamicFlow';
 import { convertFlowElements, getTaskKeyFromNodeKey } from 'src/lib/v2/StaticFlow';
 import * as WorkflowUtils from 'src/lib/v2/WorkflowUtils';
+import { getWorkflowIterationStatuses } from 'src/lib/v2/WorkflowIterationStatus';
 import {
   getArtifactsFromContext,
   getEventsByExecutions,
@@ -48,6 +49,7 @@ import {
   LinkedArtifact,
 } from 'src/mlmd/MlmdUtils';
 import { Artifact, Event, Execution } from 'src/third_party/mlmd';
+import { Workflow } from 'src/third_party/mlmd/argo_template';
 import { classes } from 'typestyle';
 import { RunDetailsProps } from './RunDetails';
 import { statusToIcon } from './StatusV2';
@@ -72,6 +74,7 @@ export interface NodeMlmdInfo {
 interface RunDetailsV2Info {
   pipeline_job: string;
   run: V2beta1Run;
+  runStatusError?: boolean;
 }
 
 export type RunDetailsV2Props = RunDetailsV2Info & RunDetailsProps;
@@ -163,6 +166,38 @@ export function RunDetailsV2(props: RunDetailsV2Props) {
   const parallelForIterations =
     isSuccess && data ? getParallelForIterations(pipelineSpec, layers, data.executions) : undefined;
 
+  // The run API stores the Argo Workflow that determines the run badge. Use its iteration DAG
+  // phases for unit statuses too; MLMD executions still provide the unit IDs and drill-down.
+  const { data: workflow, isError: workflowStatusError } = useQuery<Workflow, Error>(
+    ['RunDetailsV2_workflow', { id: runId }],
+    async () => {
+      const detail = await Apis.runServiceApi.getRun(runId);
+      const manifest = detail.pipeline_runtime?.workflow_manifest;
+      if (!manifest) {
+        throw new Error('Run has no Workflow status yet.');
+      }
+      const parsed = JSON.parse(manifest) as Workflow;
+      if (!parsed.status?.nodes && parsed.status?.compressedNodes) {
+        parsed.status.nodes = (await decodeCompressedNodes(
+          parsed.status.compressedNodes,
+        )) as Workflow['status']['nodes'];
+      }
+      return parsed;
+    },
+    {
+      enabled: parallelForIterations !== undefined,
+      staleTime: QUERY_STALE_TIME,
+      refetchInterval: QUERY_REFETCH_INTERNAL,
+    },
+  );
+  const workflowIterationStatuses = useMemo(
+    () =>
+      parallelForIterations && !workflowStatusError
+        ? getWorkflowIterationStatuses(workflow, layers, parallelForIterations.length) || new Map()
+        : new Map(),
+    [workflow, workflowStatusError, layers, parallelForIterations],
+  );
+
   const openParallelForIteration = (node: Node<FlowElementDataBase>) => {
     layerChange([...layers, getTaskKeyFromNodeKey(node.id)]);
   };
@@ -202,6 +237,9 @@ export function RunDetailsV2(props: RunDetailsV2Props) {
   return (
     <>
       <div className={classes(commonCss.page, padding(20, 't'))}>
+        {props.runStatusError && (
+          <div role='alert'>Run status is unavailable. Showing the last known state.</div>
+        )}
         <MD2Tabs selectedTab={selectedTab} tabs={TAB_NAMES} onSwitch={setSelectedTab} />
         {/* DAG tab */}
         {selectedTab === 0 && (
@@ -223,7 +261,13 @@ export function RunDetailsV2(props: RunDetailsV2Props) {
                 layers={layers}
                 onIterationOpen={openParallelForIteration}
                 onLayersUpdate={layerChange}
+                statusByIteration={workflowIterationStatuses}
               />
+            )}
+            {parallelForIterations && workflowStatusError && (
+              <div role='alert'>
+                Workflow unit statuses are unavailable. Retrying automatically.
+              </div>
             )}
 
             {/* Side panel for Execution, Artifact, Sub-DAG. */}

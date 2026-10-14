@@ -30,12 +30,15 @@ export default function RunDetailsRouter(props: RunDetailsProps) {
   let pipelineManifest: string | undefined;
 
   // Retrieves v2 run detail.
-  const { isSuccess: getV2RunSuccess, isFetching: runIsFetching, data: v2Run } = useQuery<
+  const { isFetching: runIsFetching, isError: runStatusError, data: v2Run } = useQuery<
     V2beta1Run,
     Error
-  >(['v2_run_detail', { id: runId }], () => Apis.runServiceApiV2.getRun(runId), {});
+  >(['v2_run_detail', { id: runId }], () => Apis.runServiceApiV2.getRun(runId), {
+    staleTime: 10000,
+    refetchInterval: 10000,
+  });
 
-  if (getV2RunSuccess && v2Run && v2Run.pipeline_spec) {
+  if (v2Run && v2Run.pipeline_spec) {
     pipelineManifest = JsYaml.safeDump(v2Run.pipeline_spec);
   }
 
@@ -63,10 +66,17 @@ export default function RunDetailsRouter(props: RunDetailsProps) {
 
   const templateString = pipelineManifest ?? templateStrFromPipelineVersion;
 
-  if (getV2RunSuccess && v2Run && templateString) {
+  if (v2Run && templateString) {
     const isV2Pipeline = WorkflowUtils.isPipelineSpec(templateString);
     if (isV2Pipeline) {
-      return <RunDetailsV2 pipeline_job={templateString} run={v2Run} {...props} />;
+      return (
+        <RunDetailsV2
+          pipeline_job={templateString}
+          run={v2Run}
+          runStatusError={runStatusError}
+          {...props}
+        />
+      );
     }
   }
 

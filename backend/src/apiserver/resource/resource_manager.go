@@ -723,6 +723,49 @@ func (r *ResourceManager) GetRun(runId string) (*model.Run, error) {
 	return run, nil
 }
 
+// GetRunForDisplay returns the live Workflow state while it exists. Completed Workflows are
+// eventually garbage collected, so the persisted Workflow remains the historical source.
+func (r *ResourceManager) GetRunForDisplay(ctx context.Context, runId string) (*model.Run, error) {
+	run, err := r.GetRun(runId)
+	if err != nil || run.K8SName == "" {
+		return run, err
+	}
+	namespace := run.Namespace
+	if namespace == "" && run.ExperimentId != "" {
+		if experimentNamespace, lookupErr := r.GetNamespaceFromExperimentId(run.ExperimentId); lookupErr == nil {
+			namespace = experimentNamespace
+		}
+	}
+	if namespace == "" {
+		namespace = common.GetPodNamespace()
+	}
+
+	workflow, err := r.getWorkflowClient(namespace).Get(ctx, run.K8SName, v1.GetOptions{})
+	if util.IsNotFound(err) || apierrors.IsNotFound(err) {
+		return run, nil
+	}
+	if err != nil {
+		return nil, util.Wrapf(err, "Failed to read live workflow for run %s", runId)
+	}
+	if workflow.ExecutionObjectMeta().Labels[util.LabelKeyWorkflowRunId] != runId {
+		return run, nil
+	}
+
+	status := workflow.ExecutionStatus()
+	if status.Condition() == "" {
+		return run, nil
+	}
+	state := model.RuntimeState(string(status.Condition())).ToV2()
+	if workflow.IsTerminating() {
+		state = model.RuntimeState(string(exec.ExecutionPhase(model.RunTerminatingConditionsV1))).ToV2()
+	}
+	run.State = state
+	run.Conditions = string(state.ToV1())
+	run.FinishedAtInSec = status.FinishedAt()
+	run.WorkflowRuntimeManifest = model.LargeText(workflow.ToStringForStore())
+	return run, nil
+}
+
 // Fetches runs with a given set of filtering and listing options.
 func (r *ResourceManager) ListRuns(filterContext *model.FilterContext, opts *list.Options) ([]*model.Run, int, string, error) {
 	runs, totalSize, nextPageToken, err := r.runStore.ListRuns(filterContext, opts)

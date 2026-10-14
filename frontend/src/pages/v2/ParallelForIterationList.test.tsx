@@ -43,7 +43,10 @@ describe('ParallelForIterationList', () => {
     }));
   }
 
-  function renderList(iterations: ParallelForIteration[] = makeIterations(205)) {
+  function renderList(
+    iterations: ParallelForIteration[] = makeIterations(205),
+    statusByIteration?: Map<number, 'Complete' | 'Failed' | 'Running'>,
+  ) {
     const onIterationOpen = vi.fn();
     render(
       <ParallelForIterationList
@@ -51,6 +54,7 @@ describe('ParallelForIterationList', () => {
         layers={['root', 'for-loop-1']}
         onIterationOpen={onIterationOpen}
         onLayersUpdate={vi.fn()}
+        statusByIteration={statusByIteration}
       />,
     );
     return onIterationOpen;
@@ -166,6 +170,26 @@ describe('ParallelForIterationList', () => {
     expect(screen.getByLabelText('Filter by status')).toHaveTextContent('Running');
     expect(screen.getByRole('button', { name: 'Complete: 1' })).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Failed: 1' })).not.toBeNull();
+  });
+
+  it('uses Workflow phases for rows, counts, and filters when MLMD disagrees', () => {
+    const iterations = makeIterations(2);
+    iterations[0].node.data!.state = Execution.State.COMPLETE;
+    iterations[1].node.data!.state = Execution.State.COMPLETE;
+    renderList(
+      iterations,
+      new Map([
+        [0, 'Failed'],
+        [1, 'Running'],
+      ]),
+    );
+
+    expect(screen.getByRole('button', { name: 'Complete: 0' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Failed: 1' })).not.toBeNull();
+    userEvent.click(screen.getByRole('button', { name: 'Failed: 1' }));
+    expect(screen.getByText('unit-0')).not.toBeNull();
+    expect(screen.queryByText('unit-1')).toBeNull();
+    expect(screen.getByText('Failed', { selector: 'td' })).not.toBeNull();
   });
 
   it('sorts items while retaining the iteration as a stable tie-breaker', () => {

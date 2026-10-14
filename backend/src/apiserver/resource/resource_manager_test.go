@@ -281,6 +281,43 @@ func initWithOneTimeRunV2(t *testing.T) (*FakeClientManager, *ResourceManager, *
 	return store, manager, runDetail
 }
 
+func TestGetRunForDisplayUsesLiveWorkflowAndFallsBackAfterGC(t *testing.T) {
+	store, manager, created := initWithOneTimeRunV2(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workflow, err := manager.getWorkflowClient(common.GetPodNamespace()).Get(ctx, created.K8SName, v1.GetOptions{})
+	require.NoError(t, err)
+	workflow.(*util.Workflow).Status.Phase = v1alpha1.WorkflowSucceeded
+
+	persisted, err := manager.GetRun(created.UUID)
+	require.NoError(t, err)
+	persisted.State = model.RuntimeStateFailed
+	persisted.Conditions = "Failed"
+	require.NoError(t, manager.runStore.UpdateRun(persisted))
+
+	displayed, err := manager.GetRunForDisplay(ctx, created.UUID)
+	require.NoError(t, err)
+	assert.Equal(t, model.RuntimeStateSucceeded, displayed.State)
+	assert.Contains(t, string(displayed.WorkflowRuntimeManifest), `"phase":"Succeeded"`)
+
+	workflow.(*util.Workflow).Status.Phase = ""
+	displayed, err = manager.GetRunForDisplay(ctx, created.UUID)
+	require.NoError(t, err)
+	assert.Equal(t, model.RuntimeStateFailed, displayed.State)
+
+	workflow.(*util.Workflow).Status.Phase = v1alpha1.WorkflowSucceeded
+	workflow.ExecutionObjectMeta().Labels[util.LabelKeyWorkflowRunId] = "another-run"
+	displayed, err = manager.GetRunForDisplay(ctx, created.UUID)
+	require.NoError(t, err)
+	assert.Equal(t, model.RuntimeStateFailed, displayed.State)
+
+	manager.execClient = client.NewFakeExecClient()
+	displayed, err = manager.GetRunForDisplay(ctx, created.UUID)
+	require.NoError(t, err)
+	assert.Equal(t, model.RuntimeStateFailed, displayed.State)
+}
+
 func initWithPatchedRun(t *testing.T) (*FakeClientManager, *ResourceManager, *model.Run) {
 	store, manager, exp := initWithExperiment(t)
 	apiRun := &model.Run{

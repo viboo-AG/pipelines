@@ -37,6 +37,7 @@ import SubDagLayer from 'src/components/graph/SubDagLayer';
 import { FlowElementDataBase } from 'src/components/graph/Constants';
 import { color } from 'src/Css';
 import { ParallelForIteration } from 'src/lib/v2/DynamicFlow';
+import { IterationStatus } from 'src/lib/v2/WorkflowIterationStatus';
 import { Execution } from 'src/third_party/mlmd';
 
 const DEFAULT_ROWS_PER_PAGE = 50;
@@ -48,6 +49,7 @@ const STATUS_OPTIONS = [
   'Complete',
   'Failed',
   'Cached',
+  'Skipped',
   'Canceled',
   'Unknown',
 ];
@@ -57,11 +59,21 @@ type SummaryStatus = typeof SUMMARY_STATUSES[number];
 type SortField = 'item' | 'iteration' | 'status';
 type SortDirection = 'asc' | 'desc';
 
+function statusOf(
+  iteration: ParallelForIteration,
+  statusByIteration?: ReadonlyMap<number, IterationStatus>,
+): string {
+  return statusByIteration
+    ? statusByIteration.get(iteration.iterationIndex) || 'Unknown'
+    : getIterationStatus(iteration.node);
+}
+
 export interface ParallelForIterationListProps {
   iterations: ParallelForIteration[];
   layers: string[];
   onLayersUpdate: (layers: string[]) => void;
   onIterationOpen: (node: Node<FlowElementDataBase>) => void;
+  statusByIteration?: ReadonlyMap<number, IterationStatus>;
 }
 
 export default function ParallelForIterationList({
@@ -69,6 +81,7 @@ export default function ParallelForIterationList({
   layers,
   onLayersUpdate,
   onIterationOpen,
+  statusByIteration,
 }: ParallelForIterationListProps) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(ALL_STATUSES);
@@ -85,20 +98,20 @@ export default function ParallelForIterationList({
       Failed: 0,
     };
     for (const iteration of iterations) {
-      const status = getIterationStatus(iteration.node);
+      const status = statusOf(iteration, statusByIteration);
       if (status in counts) {
         counts[status as SummaryStatus]++;
       }
     }
     return counts;
-  }, [iterations]);
+  }, [iterations, statusByIteration]);
 
   const visibleIterations = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase();
     const filteredIterations = iterations.filter(iteration => {
       const itemMatches = iteration.node.data?.label.toLocaleLowerCase().includes(normalizedSearch);
       const statusMatches =
-        statusFilter === ALL_STATUSES || getIterationStatus(iteration.node) === statusFilter;
+        statusFilter === ALL_STATUSES || statusOf(iteration, statusByIteration) === statusFilter;
       return itemMatches && statusMatches;
     });
 
@@ -111,14 +124,16 @@ export default function ParallelForIterationList({
           numeric: true,
         });
       } else {
-        comparison = getIterationStatus(left.node).localeCompare(getIterationStatus(right.node));
+        comparison = statusOf(left, statusByIteration).localeCompare(
+          statusOf(right, statusByIteration),
+        );
       }
       if (comparison === 0) {
         comparison = left.iterationIndex - right.iterationIndex;
       }
       return sortDirection === 'asc' ? comparison : -comparison;
     });
-  }, [iterations, search, sortDirection, sortField, statusFilter]);
+  }, [iterations, search, sortDirection, sortField, statusFilter, statusByIteration]);
 
   useEffect(() => {
     const lastPage = Math.max(0, Math.ceil(visibleIterations.length / rowsPerPage) - 1);
@@ -313,7 +328,7 @@ export default function ParallelForIterationList({
                         {iteration.node.data!.label}
                       </ButtonBase>
                     </TableCell>
-                    <TableCell>{getIterationStatus(iteration.node)}</TableCell>
+                    <TableCell>{statusOf(iteration, statusByIteration)}</TableCell>
                   </TableRow>
                 ))}
                 {pagedIterations.length === 0 && (

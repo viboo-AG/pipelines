@@ -132,6 +132,9 @@ describe('RunDetailsV2', () => {
       new metadataStoreServicePb.GetArtifactsByIDResponse(),
     );
     vi.spyOn(Apis.experimentServiceApiV2, 'getExperiment').mockResolvedValue({});
+    vi.spyOn(Apis.runServiceApi, 'getRun').mockResolvedValue({
+      pipeline_runtime: { workflow_manifest: '{}' },
+    });
   });
 
   it('Render detail page with reactflow', async () => {
@@ -193,6 +196,32 @@ root:
       executionsResponse,
     );
     vi.spyOn(Apis.experimentServiceApiV2, 'getExperiment').mockResolvedValue(TEST_EXPERIMENT);
+    vi.spyOn(Apis.runServiceApi, 'getRun').mockResolvedValue({
+      pipeline_runtime: {
+        workflow_manifest: JSON.stringify({
+          metadata: { name: 'training-abc' },
+          status: {
+            nodes: {
+              root: { id: 'root', name: 'training-abc.root', type: 'DAG' },
+              loop: {
+                id: 'loop',
+                name: 'training-abc.root.for-loop-1',
+                displayName: 'for-loop-1',
+                type: 'DAG',
+              },
+              iteration: {
+                id: 'iteration',
+                name: 'training-abc.root.for-loop-1.iteration-iterations(173:173)',
+                displayName: 'iteration-iterations(173:173)',
+                boundaryID: 'loop',
+                phase: 'Error',
+                type: 'DAG',
+              },
+            },
+          },
+        }),
+      },
+    });
 
     render(
       <CommonTestWrapper>
@@ -212,7 +241,9 @@ root:
 
     await waitFor(() => expect(screen.getByTestId('ParallelForIterationList')).not.toBeNull());
     expect(screen.getByText('205 of 205 items')).not.toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Failed: 1' })).not.toBeNull());
     userEvent.type(screen.getByLabelText('Search items'), 'unit-173');
+    expect(screen.getByText('Failed', { selector: 'td' })).not.toBeNull();
     userEvent.click(screen.getByRole('button', { name: 'Open Sub-DAG for unit-173' }));
 
     await waitFor(() => expect(screen.getByTestId('DagCanvas')).not.toBeNull());

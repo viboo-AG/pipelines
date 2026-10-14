@@ -189,7 +189,7 @@ func (s *BaseRunServer) getRun(ctx context.Context, runId string) (*model.Run, e
 	if err != nil {
 		return nil, util.Wrap(err, "Failed to authorize the request")
 	}
-	run, err := s.resourceManager.GetRun(runId)
+	run, err := s.resourceManager.GetRunForDisplay(ctx, runId)
 	if err != nil {
 		return nil, err
 	}

@@ -796,6 +796,8 @@ func TestGetRunV1(t *testing.T) {
 
 	returnedRun, err := server.GetRunV1(context.Background(), &apiv1beta1.GetRunRequest{RunId: runDetail.GetRun().GetId()})
 	assert.Nil(t, err)
+	// GetRun reflects the live Workflow phase even when the stored run is still Pending.
+	runDetail.Run.Status = "Running"
 	assert.Equal(t, runDetail, returnedRun)
 
 	returnedRun2, err := server.GetRunV1(context.Background(), &apiv1beta1.GetRunRequest{RunId: "wrong-id"})
